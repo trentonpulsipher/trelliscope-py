@@ -665,3 +665,27 @@ def test_serve_responds_to_http(iris_df_no_duplicates):
         time.sleep(0.3)  # let the daemon thread bind its socket
         response = urllib.request.urlopen("http://localhost:19878/index.html", timeout=3)
         assert response.getcode() == 200
+
+
+def test_save_figure_in_jupyter_event_loop(tmp_path):
+    """_save_figure succeeds even when called from inside a running event loop (Jupyter)."""
+    import asyncio
+    from unittest.mock import MagicMock
+
+    captured = {}
+
+    def fake_write_image(path):
+        captured["path"] = path
+        open(path, "wb").close()
+
+    mock_fig = MagicMock()
+    mock_fig.write_image.side_effect = fake_write_image
+
+    out = tmp_path / "out.png"
+
+    async def run():
+        Trelliscope._save_figure(mock_fig, str(out))
+
+    asyncio.run(run())
+    assert captured["path"] == str(out)
+    assert mock_fig.write_image.call_count == 1

@@ -1235,17 +1235,35 @@ class Trelliscope:
     def _save_figure(fig, filepath: str) -> None:
         """Save a figure to disk, dispatching on Plotly vs matplotlib."""
         if hasattr(fig, "write_image"):
+            import asyncio
+            import concurrent.futures
+
+            # kaleido 1.x uses asyncio.run() internally. In Jupyter notebooks
+            # an event loop is already running, which causes asyncio.run() to
+            # raise RuntimeError ("Did you set 0 or less tabs?"). Running
+            # write_image in a worker thread avoids this because threads start
+            # with no event loop, so kaleido's asyncio.run() can create one.
             try:
-                fig.write_image(filepath)
+                asyncio.get_running_loop()
+                _in_jupyter = True
+            except RuntimeError:
+                _in_jupyter = False
+
+            try:
+                if _in_jupyter:
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                        ex.submit(fig.write_image, filepath).result()
+                else:
+                    fig.write_image(filepath)
             except ValueError as e:
                 if "kaleido" in str(e).lower():
                     raise ValueError(
                         "Plotly could not export an image because kaleido is not "
-                        "working in this environment.\n\n"
-                        "kaleido 0.2.x requires a Chromium browser binary, which is "
-                        "not available in some environments (e.g. SageMaker, Docker). "
-                        "Install the self-contained 0.1.x build instead:\n\n"
-                        "    pip install 'kaleido==0.1.0.post1'\n\n"
+                        "installed or not working in this environment.\n\n"
+                        "Install kaleido:\n\n"
+                        "    pip install kaleido\n\n"
+                        "If you are in SageMaker, also run:\n\n"
+                        "    plotly_get_chrome\n\n"
                         "Then restart your kernel/session."
                     ) from None
                 raise
