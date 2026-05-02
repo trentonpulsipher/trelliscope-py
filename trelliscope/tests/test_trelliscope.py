@@ -296,50 +296,43 @@ def test_infer_primary_panel(mars_df: pd.DataFrame):
     assert tr.primary_panel in ("img_src", "img2")
 
 
-@pytest.mark.skip(
-    "Need to find a new set of images to download, because nasa.gov is taking a long time."
-)
-def test_copy_images_to_build_directory(mars_df: pd.DataFrame):
-    mars_df = mars_df[:3]  # reduce to two rows
+def test_copy_images_to_build_directory():
+    """Local image files should be copied into the output directory on write_display()."""
+    import base64
+
+    # Minimal valid 1×1 white PNG — no external download needed
+    TINY_PNG = base64.b64decode(
+        b"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk"
+        b"+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+    )
 
     with tempfile.TemporaryDirectory() as output_dir:
-        with tempfile.TemporaryDirectory() as temp_dir2:
-            # download the images to a temp directory and update the data frame
-            for i in range(len(mars_df)):
-                original_file = mars_df["img_src"][i]
-                file_name = os.path.basename(original_file)
-                temp_dir_file = os.path.join(temp_dir2, file_name)
+        with tempfile.TemporaryDirectory() as img_dir:
+            rows = []
+            for i in range(3):
+                img_path = os.path.join(img_dir, f"row_{i}.png")
+                with open(img_path, "wb") as f:
+                    f.write(TINY_PNG)
+                rows.append({"id": str(i), "value": float(i), "img_panel": img_path})
+            df = pd.DataFrame(rows)
 
-                # security check to disallow urls starting with file: or custom schemas.
-                if not original_file.startswith(("http:", "https:")):
-                    raise ValueError("URL must start with 'http:' or 'https:'")
-                else:
-                    with urllib.urlopen(original_file, timeout=1) as response, open(
-                        temp_dir_file, "wb"
-                    ) as out_file:
-                        shutil.copyfileobj(response, out_file)
-
-                mars_df["img_src"][i] = temp_dir_file
-
-            tr = Trelliscope(mars_df, "mars_rover", path=output_dir)
+            tr = Trelliscope(df, "test", path=output_dir)
             tr = tr.add_panel(
-                ImagePanel("img_src", FilePanelSource(True), should_copy_to_output=True)
+                ImagePanel("img_panel", FilePanelSource(True), should_copy_to_output=True)
             )
 
-            # At first, the image should be in the temp dir that we put it in
-            original_image = tr.data_frame["img_src"][0]
-            assert temp_dir2 in original_image
+            # Before write: paths point into img_dir
+            assert img_dir in tr.data_frame["img_panel"].iloc[0]
 
             tr = tr.write_display()
 
-            # Now the image should not be in the temp dir
-            new_image = tr.data_frame["img_src"][0]
-            new_image_full_path = os.path.join(tr.get_dataset_display_path(), new_image)
-            assert temp_dir2 not in new_image_full_path
+            # After write: paths must no longer point into the original img_dir
+            new_img = tr.data_frame["img_panel"].iloc[0]
+            full_path = os.path.join(tr.get_dataset_display_path(), new_img)
+            assert img_dir not in full_path
 
-            # But the image should exist in the output dir
-            assert output_dir in new_image_full_path
-            assert os.path.exists(new_image_full_path)
+            # And the copied file must actually exist in the output directory
+            assert os.path.exists(full_path)
 
 
 def test_set_default_sort(mars_df: pd.DataFrame):
@@ -412,14 +405,37 @@ def test_set_default_sort(mars_df: pd.DataFrame):
         tr.set_default_sort(["a", "b", "c"], ["asc", "desc"])
 
 
-@pytest.mark.skip("Need to better understand the rules of inferring states")
-def test_infer_state(mars_df: pd.DataFrame):
-    with tempfile.TemporaryDirectory() as output_dir:
-        tr = Trelliscope(mars_df, "mars_rover", path=output_dir)
-        tr._infer_state(tr.state)
+def test_infer_state(iris_df_no_duplicates):
+    import pandas as pd
+    from trelliscope.state import CategoryFilterState, DisplayState, LayoutState
 
-    raise NotImplementedError()
-    # TODO: Make sure to test the intersection of CategoryFilter levels and Factor meta levels.
+    df = iris_df_no_duplicates.copy()
+    df["Species"] = pd.Categorical(df["Species"])
+    df["img"] = "test.png"
+    pnl = ImagePanel("img", source=FilePanelSource(False), should_copy_to_output=False)
+    tr = Trelliscope(df, "test").add_panel(pnl).infer()
+
+    # Empty state → default LayoutState(ncol=3) and LabelState(key_cols)
+    inferred = tr._infer_state(DisplayState())
+    assert inferred.layout is not None
+    assert inferred.layout.ncol == 3
+    assert inferred.labels is not None
+    for key in tr.key_cols:
+        assert key in inferred.labels.varnames
+
+    # Existing layout is preserved, not overwritten
+    state_with_layout = DisplayState()
+    state_with_layout.set(LayoutState(ncol=5))
+    inferred2 = tr._infer_state(state_with_layout)
+    assert inferred2.layout.ncol == 5
+
+    # CategoryFilterState values are intersected with FactorMeta levels
+    state_with_filter = DisplayState()
+    cf = CategoryFilterState("Species", values=["setosa", "no_such_species"])
+    state_with_filter.set(cf)
+    inferred3 = tr._infer_state(state_with_filter)
+    assert "setosa" in inferred3.filter["Species"].values
+    assert "no_such_species" not in inferred3.filter["Species"].values
 
 
 def test_set_primary_panel(mars_df: pd.DataFrame):
@@ -610,3 +626,42 @@ def test_set_show_info_on_load_invalid_type(iris_tr):
 
 def test_has_info_false_by_default(iris_tr):
     assert iris_tr.to_dict()["hasInfo"] is False
+
+
+# ---------------------------------------------------------------------------
+# serve()
+# ---------------------------------------------------------------------------
+
+
+def test_serve_raises_before_write(iris_df_no_duplicates):
+    df = iris_df_no_duplicates.copy()
+    df["img"] = "test.png"
+    pnl = ImagePanel("img", source=FilePanelSource(False), should_copy_to_output=False)
+    tr = Trelliscope(df, "test").add_panel(pnl)
+    with pytest.raises(ValueError, match="write_display"):
+        tr.serve(port=19876)
+
+
+def test_serve_returns_self(iris_df_no_duplicates):
+    df = iris_df_no_duplicates.copy()
+    df["img"] = "test.png"
+    pnl = ImagePanel("img", source=FilePanelSource(False), should_copy_to_output=False)
+    with tempfile.TemporaryDirectory() as output_dir:
+        tr = Trelliscope(df, "test", path=output_dir).add_panel(pnl).write_display()
+        result = tr.serve(port=19877)
+        assert result is tr
+
+
+def test_serve_responds_to_http(iris_df_no_duplicates):
+    """The background server should return HTTP 200 for index.html."""
+    import time
+
+    df = iris_df_no_duplicates.copy()
+    df["img"] = "test.png"
+    pnl = ImagePanel("img", source=FilePanelSource(False), should_copy_to_output=False)
+    with tempfile.TemporaryDirectory() as output_dir:
+        tr = Trelliscope(df, "test", path=output_dir).add_panel(pnl).write_display()
+        tr.serve(port=19878)
+        time.sleep(0.3)  # let the daemon thread bind its socket
+        response = urllib.request.urlopen("http://localhost:19878/index.html", timeout=3)
+        assert response.getcode() == 200

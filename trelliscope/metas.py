@@ -288,11 +288,13 @@ class PanelMeta(Meta):
         return result
 
     def check_variable(self, df: pd.DataFrame):
-        """
-        Checks that the variable is an appropriate type for panels.
-        """
-        # TODO: Fill this in
-        pass
+        """Checks that the panel column exists in the dataframe."""
+        if self.varname not in df.columns:
+            raise ValueError(
+                self._get_data_error_message(
+                    f"Panel column '{self.varname}' is not present in the data frame."
+                )
+            )
 
 
 class FactorMeta(Meta):
@@ -390,7 +392,13 @@ class DatetimeMeta(Meta):
             sortable=True,
         )
 
-        # TODO: Consider validating timezone
+        if not isinstance(timezone, str):
+            raise TypeError(
+                f"timezone must be a string (e.g. 'UTC', 'America/New_York'), "
+                f"got {type(timezone).__name__}."
+            )
+        if not timezone.strip():
+            raise ValueError("timezone must not be an empty string.")
 
         self.timezone = timezone
 
@@ -447,6 +455,11 @@ class GraphMeta(Meta):
         utils.check_graph_var(
             df, self.varname, self.idvarname, self._get_data_error_message
         )
+
+    def cast_variable(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Validates graph column structure. Returns the dataframe unchanged."""
+        self.check_variable(df)
+        return df
 
 
 class GeoMeta(Meta):
