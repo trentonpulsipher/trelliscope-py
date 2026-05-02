@@ -517,3 +517,96 @@ def test_set_var_labels_applied_during_infer(iris_df_no_duplicates):
 def test_set_var_labels_invalid_type(iris_tr):
     with pytest.raises(ValueError, match="string"):
         iris_tr.set_var_labels(Species=123)
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: set_default_layout (sidebar + visible_filters)
+# ---------------------------------------------------------------------------
+
+
+def test_set_default_layout_sidebar(iris_df_no_duplicates):
+    tr = Trelliscope(iris_df_no_duplicates, name="iris")
+    tr = tr.set_default_layout(ncol=2, sidebar=False)
+    assert tr.state.layout.sidebar is False
+    assert tr.state.layout.ncol == 2
+
+
+def test_set_default_layout_visible_filters(iris_df_no_duplicates):
+    tr = Trelliscope(iris_df_no_duplicates, name="iris")
+    tr = tr.set_default_layout(ncol=3, visible_filters=["Species", "Sepal.Length"])
+    assert tr.state.layout.visible_filters == ["Species", "Sepal.Length"]
+
+
+def test_set_default_layout_visible_filters_unknown_col(iris_df_no_duplicates):
+    from trelliscope.state import LayoutState
+
+    tr = Trelliscope(iris_df_no_duplicates, name="iris")
+    with pytest.raises(ValueError, match="references columns not in the data"):
+        tr.set_default_layout(visible_filters=["no_such_col"])
+
+
+def test_set_default_layout_serialized(iris_df_no_duplicates):
+    tr = Trelliscope(iris_df_no_duplicates, name="iris")
+    tr = tr.set_default_layout(ncol=4, sidebar=False, visible_filters=["Species"])
+    d = tr.state.layout.to_dict()
+    assert d["sidebar"] is False
+    assert d["visible_filters"] == ["Species"]
+    assert d["ncol"] == 4
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: set_info_html and set_show_info_on_load
+# ---------------------------------------------------------------------------
+
+
+def test_set_info_html(iris_tr):
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".html", delete=False
+    ) as f:
+        f.write("<h1>Hello Trelliscope</h1>")
+        html_path = f.name
+
+    try:
+        tr = iris_tr.set_info_html(html_path)
+        assert tr.info_html == "<h1>Hello Trelliscope</h1>"
+        assert tr.to_dict()["hasInfo"] is True
+    finally:
+        os.unlink(html_path)
+
+
+def test_set_info_html_missing_file(iris_tr):
+    with pytest.raises(ValueError, match="not found"):
+        iris_tr.set_info_html("/nonexistent/path/info.html")
+
+
+def test_set_info_html_does_not_mutate_original(iris_tr):
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".html", delete=False) as f:
+        f.write("<p>test</p>")
+        html_path = f.name
+
+    try:
+        tr2 = iris_tr.set_info_html(html_path)
+        assert iris_tr.info_html is None
+        assert tr2.info_html is not None
+    finally:
+        os.unlink(html_path)
+
+
+def test_set_show_info_on_load(iris_tr):
+    tr = iris_tr.set_show_info_on_load(True)
+    assert tr.show_info_on_load is True
+    assert tr.to_dict()["infoOnLoad"] is True
+
+
+def test_set_show_info_on_load_default_false(iris_tr):
+    assert iris_tr.show_info_on_load is False
+    assert iris_tr.to_dict()["infoOnLoad"] is False
+
+
+def test_set_show_info_on_load_invalid_type(iris_tr):
+    with pytest.raises(TypeError, match="must be a boolean"):
+        iris_tr.set_show_info_on_load("yes")
+
+
+def test_has_info_false_by_default(iris_tr):
+    assert iris_tr.to_dict()["hasInfo"] is False

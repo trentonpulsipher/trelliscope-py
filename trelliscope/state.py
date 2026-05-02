@@ -80,25 +80,45 @@ class State:
 class LayoutState(State):
     VIEWTYPE_GRID = "grid"
 
-    def __init__(self, ncol: int = 1, page: int = 1):
+    def __init__(
+        self,
+        ncol: int = 1,
+        page: int = 1,
+        sidebar: bool = True,
+        visible_filters: list = None,
+    ):
         """
         Params:
-            ncol: int - Number of cols
-            page: int - Number of pages
+            ncol: int - Number of columns in the panel grid.
+            page: int - Initial page number.
+            sidebar: bool - Whether the filter sidebar is open by default.
+            visible_filters: list - Variable names whose filter controls are
+                expanded in the sidebar by default. None means all are collapsed.
         """
         super().__init__(State.TYPE_LAYOUT)
 
         utils.check_int(ncol, "ncol")
         utils.check_int(page, "page")
+        utils.check_bool(sidebar, "sidebar")
+
+        if visible_filters is not None:
+            utils.check_is_list(visible_filters, self._get_error_message)
 
         self.ncol = ncol
         self.page = page
+        self.sidebar = sidebar
+        self.visible_filters = visible_filters
         self.viewtype = LayoutState.VIEWTYPE_GRID
 
     def check_with_data(self, df: pd.DataFrame):
-        # This comment is in the R version:
-        # TODO: could check to see if "page" makes sense after applying filters
-        # and accounting for nrow and ncol
+        if self.visible_filters is not None:
+            extra = set(self.visible_filters) - set(df.columns)
+            if extra:
+                raise ValueError(
+                    self._get_data_error_message(
+                        f"visible_filters references columns not in the data: {extra}"
+                    )
+                )
         return True
 
 

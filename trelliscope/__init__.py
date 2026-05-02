@@ -7,4 +7,5 @@ from trelliscope.input import (
     SelectInput,
     TextInput,
 )
+from trelliscope.theme import Theme
 from trelliscope.trelliscope import Trelliscope

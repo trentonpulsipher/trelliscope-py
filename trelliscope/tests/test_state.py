@@ -50,6 +50,40 @@ def test_layout_state_init():
     assert state.page == expected_page
     assert state.type == State.TYPE_LAYOUT
     assert state.viewtype == LayoutState.VIEWTYPE_GRID
+    # New Phase 2 defaults
+    assert state.sidebar is True
+    assert state.visible_filters is None
+
+
+def test_layout_state_sidebar_and_visible_filters(iris_df):
+    state = LayoutState(ncol=2, sidebar=False, visible_filters=["Sepal.Length", "Species"])
+    assert state.sidebar is False
+    assert state.visible_filters == ["Sepal.Length", "Species"]
+    state.check_with_data(iris_df)
+
+
+def test_layout_state_visible_filters_unknown_column(iris_df):
+    state = LayoutState(visible_filters=["no_such_column"])
+    with pytest.raises(ValueError, match="references columns not in the data"):
+        state.check_with_data(iris_df)
+
+
+def test_layout_state_invalid_sidebar_type():
+    with pytest.raises(TypeError, match="must be a boolean"):
+        LayoutState(sidebar="yes")
+
+
+def test_layout_state_visible_filters_must_be_list():
+    with pytest.raises(ValueError, match="to be a list"):
+        LayoutState(visible_filters="Species")
+
+
+def test_layout_state_serializes_sidebar_and_visible_filters(iris_df):
+    state = LayoutState(ncol=3, sidebar=False, visible_filters=["Sepal.Length"])
+    state.check_with_data(iris_df)
+    d = state.to_dict()
+    assert d["sidebar"] is False
+    assert d["visible_filters"] == ["Sepal.Length"]
 
 
 def test_layout_state(iris_df):

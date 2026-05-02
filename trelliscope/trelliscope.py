@@ -25,6 +25,7 @@ from trelliscope.metas import (
 )
 from trelliscope.panels import FigurePanel, ImagePanel, Panel, PanelOptions
 from trelliscope.progress_bar import ProgressBar
+from trelliscope.theme import Theme
 from trelliscope.state import (
     CategoryFilterState,
     DisplayState,
@@ -139,6 +140,9 @@ class Trelliscope:
         self.input_email: str = None
         self.input_vars: list = None
         self.var_labels: dict = {}
+        self.theme: Theme = None
+        self.info_html: str = None
+        self.show_info_on_load: bool = False
 
     def _infer_primary_panel(self) -> None:
         """
@@ -388,6 +392,9 @@ class Trelliscope:
         result["inputVars"] = self.input_vars
         result["thumbnailurl"] = self.thumbnail_url
         result["primarypanel"] = self.primary_panel
+        result["theme"] = self.theme.to_dict() if self.theme is not None else None
+        result["hasInfo"] = self.info_html is not None
+        result["infoOnLoad"] = self.show_info_on_load
 
         return result
 
@@ -524,6 +531,7 @@ class Trelliscope:
 
         tr = tr._check_panels()
         tr = tr._infer_thumbnail_url()
+        tr._write_info_html()
 
         tr._write_display_info(jsonp, config["id"])
         tr._write_meta_data(config["id"])
@@ -1366,18 +1374,28 @@ class Trelliscope:
 
         return tr
 
-    def set_default_layout(self, ncol: int = 1, page: int = 1):
+    def set_default_layout(
+        self,
+        ncol: int = 1,
+        page: int = 1,
+        sidebar: bool = True,
+        visible_filters: list = None,
+    ):
         """
         Add a layout state specification to a trelliscope display.
+
         Params:
-            ncol:int - The number of columns.
-            page:int - The number of pages.
+            ncol:int - The number of panel columns in the grid.
+            page:int - The initial page number.
+            sidebar:bool - Whether the filter sidebar is open by default.
+            visible_filters:list - Variable names whose filter controls start
+                expanded in the sidebar. If None, all are collapsed.
 
         Returns a copy of the Trelliscope object. The original is not modified.
         """
         tr = self.__copy()
 
-        layout_state = LayoutState(ncol, page)
+        layout_state = LayoutState(ncol, page, sidebar, visible_filters)
         layout_state.check_with_data(tr.data_frame)
 
         state2 = tr.state._copy()
@@ -1385,6 +1403,115 @@ class Trelliscope:
 
         tr = tr.set_state(state2)
         return tr
+
+    def set_theme(
+        self,
+        primary: str = None,
+        primary2: str = None,
+        primary3: str = None,
+        background: str = None,
+        background2: str = None,
+        background3: str = None,
+        bars: str = None,
+        text: str = None,
+        text2: str = None,
+        button_text: str = None,
+        text_disabled: str = None,
+        error: str = None,
+        font_family: str = None,
+        logo: str = None,
+    ):
+        """
+        Set visual theme colors and fonts for this display.
+
+        All color parameters accept CSS color strings (e.g. "#4C72B0",
+        "rgb(76,114,176)", "steelblue"). Unspecified parameters take the
+        viewer's built-in defaults.
+
+        Params:
+            primary: Main brand / accent color.
+            primary2: Secondary accent color.
+            primary3: Tertiary accent color.
+            background: Main background color.
+            background2: Secondary background color.
+            background3: Tertiary background color.
+            bars: Color for bars / progress indicators.
+            text: Primary text color.
+            text2: Secondary text color.
+            button_text: Button label color.
+            text_disabled: Disabled text color.
+            error: Error / warning highlight color.
+            font_family: CSS font-family string.
+            logo: URL or base64 data URI for a logo image.
+
+        Returns a copy of the Trelliscope object. The original is not modified.
+        """
+        tr = self.__copy()
+        tr.theme = Theme(
+            primary=primary,
+            primary2=primary2,
+            primary3=primary3,
+            background=background,
+            background2=background2,
+            background3=background3,
+            bars=bars,
+            text=text,
+            text2=text2,
+            button_text=button_text,
+            text_disabled=text_disabled,
+            error=error,
+            font_family=font_family,
+            logo=logo,
+        )
+        return tr
+
+    def set_info_html(self, file: str):
+        """
+        Set custom HTML content for the info panel of this display.
+
+        The file's content is read and stored. When write_display() is called,
+        it is written as info.html in the display directory, and displayInfo
+        will indicate hasInfo=True so the viewer can load it.
+
+        Params:
+            file:str - Path to an HTML file to use as the info panel.
+
+        Returns a copy of the Trelliscope object. The original is not modified.
+        """
+        tr = self.__copy()
+
+        if not os.path.isfile(file):
+            raise ValueError(f"Info HTML file not found: '{file}'")
+
+        with open(file) as f:
+            tr.info_html = f.read()
+
+        return tr
+
+    def set_show_info_on_load(self, show: bool = True):
+        """
+        Control whether the info panel opens automatically when the display loads.
+
+        Params:
+            show:bool - True to auto-open the info panel; False (default) to keep it closed.
+
+        Returns a copy of the Trelliscope object. The original is not modified.
+        """
+        tr = self.__copy()
+        utils.check_bool(show, "show")
+        tr.show_info_on_load = show
+        return tr
+
+    def _write_info_html(self) -> None:
+        """
+        Writes info.html to the dataset display directory if info_html content has been set.
+        """
+        if self.info_html is None:
+            return
+
+        info_html_path = os.path.join(self.get_dataset_display_path(), "info.html")
+        with open(info_html_path, "w") as f:
+            f.write(self.info_html)
 
     def set_default_sort(
         self, varnames: list, sort_directions: list = None, add: bool = False
