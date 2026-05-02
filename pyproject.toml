@@ -12,7 +12,7 @@ name = "trelliscope"
 dependencies = [
     "pandas >= 1.5.2",
     "kaleido",
-    "plotly >= 5.18.0",
+    "plotly >= 5.19.0",
     "plotly-express >= 0.4.1",
     "importlib_resources;python_version<'3.9'"
 ]
