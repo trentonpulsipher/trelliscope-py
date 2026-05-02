@@ -447,11 +447,73 @@ def test_infer_panels(mars_df: pd.DataFrame):
         assert tr.primary_panel == "img_src"
 
 
-@pytest.mark.skip("Test these when inputs are functioning")
-def test_add_input(mars_df: pd.DataFrame):
-    raise NotImplementedError
+def test_add_input(iris_tr):
+    from trelliscope.input import TextInput
+
+    inp = TextInput("notes", label="Notes", width=60, height=4)
+    tr = iris_tr.add_input(inp)
+
+    assert "notes" in tr.inputs
+    assert tr.inputs["notes"].label == "Notes"
 
 
-@pytest.mark.skip("Test these when inputs are functioning")
-def test_add_inputs(mars_df: pd.DataFrame):
-    raise NotImplementedError
+def test_add_inputs(iris_tr):
+    from trelliscope.input import NumberInput, RadioInput, TextInput
+
+    inputs = [
+        TextInput("comments", label="Comments"),
+        RadioInput("quality", label="Quality", options=["good", "bad"]),
+        NumberInput("score", label="Score", min=0, max=10),
+    ]
+    tr = iris_tr.add_inputs(inputs, email="test@example.com", vars=["Species"])
+
+    assert len(tr.inputs) == 3
+    assert tr.input_email == "test@example.com"
+    assert tr.input_vars == ["Species"]
+
+
+def test_add_inputs_serialized(iris_tr):
+    from trelliscope.input import RadioInput, TextInput
+
+    inputs = [
+        TextInput("notes"),
+        RadioInput("flag", options=["yes", "no"]),
+    ]
+    tr = iris_tr.add_inputs(inputs, email="user@test.com")
+    d = tr.to_dict()
+
+    assert d["inputs"] is not None
+    assert len(d["inputs"]) == 2
+    assert d["inputEmailAddr"] == "user@test.com"
+    types = {i["type"] for i in d["inputs"]}
+    assert types == {"text", "radio"}
+
+
+def test_set_var_labels(iris_tr):
+    tr = iris_tr.set_var_labels(Species="Species Name", **{"Sepal.Length": "Sepal Length (cm)"})
+
+    assert tr.var_labels["Species"] == "Species Name"
+    assert tr.var_labels["Sepal.Length"] == "Sepal Length (cm)"
+
+
+def test_set_var_labels_applied_to_existing_meta(iris_df_no_duplicates):
+    from trelliscope.metas import StringMeta
+
+    tr = Trelliscope(iris_df_no_duplicates, name="iris")
+    tr = tr.set_meta(StringMeta("Species"))
+    tr = tr.set_var_labels(Species="Species Name")
+
+    assert tr.metas["Species"].label == "Species Name"
+
+
+def test_set_var_labels_applied_during_infer(iris_df_no_duplicates):
+    tr = Trelliscope(iris_df_no_duplicates, name="iris")
+    tr = tr.set_var_labels(**{"Sepal.Length": "Sepal Length (cm)"})
+    tr = tr._infer_metas()
+
+    assert tr.metas["Sepal.Length"].label == "Sepal Length (cm)"
+
+
+def test_set_var_labels_invalid_type(iris_tr):
+    with pytest.raises(ValueError, match="string"):
+        iris_tr.set_var_labels(Species=123)

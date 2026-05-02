@@ -136,6 +136,9 @@ class Trelliscope:
 
         self.views = {}
         self.inputs = {}
+        self.input_email: str = None
+        self.input_vars: list = None
+        self.var_labels: dict = {}
 
     def _infer_primary_panel(self) -> None:
         """
@@ -287,9 +290,15 @@ class Trelliscope:
 
         return tr
 
-    def add_inputs(self, inputs: list):
+    def add_inputs(self, inputs: list, email: str = None, vars: list = None):
         """
-        Convenience method to add muliple inputs.
+        Convenience method to add multiple inputs, with optional email export settings.
+
+        Params:
+            inputs: list of Input objects to add.
+            email: Optional email address used to export annotations as CSV.
+            vars: Optional list of variable names to include in the CSV export alongside
+                the input annotations.
 
         Returns a copy of the Trelliscope object. The original is not modified.
         """
@@ -297,6 +306,16 @@ class Trelliscope:
 
         for input_obj in inputs:
             tr = tr.add_input(input_obj)
+
+        if email is not None:
+            if not isinstance(email, str):
+                raise ValueError("'email' must be a string.")
+            tr.input_email = email
+
+        if vars is not None:
+            if not isinstance(vars, list):
+                raise ValueError("'vars' must be a list of variable names.")
+            tr.input_vars = vars
 
         return tr
 
@@ -360,11 +379,13 @@ class Trelliscope:
         result["state"] = self.state.to_dict()
         result["views"] = [view.to_dict() for view in self.views.values()]
 
-        if self.inputs.values is None or len(self.inputs.values()) == 0:
+        if len(self.inputs) == 0:
             result["inputs"] = None
         else:
-            result["inputs"] = [input.to_dict() for input in self.inputs.values()]
+            result["inputs"] = [inp.to_dict() for inp in self.inputs.values()]
 
+        result["inputEmailAddr"] = self.input_email
+        result["inputVars"] = self.input_vars
         result["thumbnailurl"] = self.thumbnail_url
         result["primarypanel"] = self.primary_panel
 
@@ -520,19 +541,39 @@ class Trelliscope:
 
     def _check_panels(self):
         """
-        Checks the files in the panels directory, then compares them against the
-        key columns in the dataframe. If there are key columns that do not have
-        corresponding files, it will throw an error specifying the extra key columns
-        that were discovered.
+        Validates panel columns against the dataframe and internal state.
+
+        Checks:
+        - Every declared panel column exists in the dataframe.
+        - No panel column contains all-null values.
+        - The primary_panel (if set) refers to a declared panel.
 
         Throws:
             ValueError
         """
         tr = self.__copy()
 
-        os.path.join(tr.get_displays_path(), "panels")
+        panel_cols = tr._get_panel_columns()
 
-        # TODO: Fill this in
+        for panel_col in panel_cols:
+            if panel_col not in tr.data_frame.columns:
+                raise ValueError(
+                    f"Panel column '{panel_col}' is not present in the data frame."
+                )
+            if tr.data_frame[panel_col].isna().all():
+                raise ValueError(
+                    f"Panel column '{panel_col}' contains only null values."
+                )
+            if tr.data_frame[panel_col].isna().any():
+                logging.warning(
+                    f"Panel column '{panel_col}' contains some null values."
+                )
+
+        if tr.primary_panel is not None and tr.primary_panel not in tr.panels:
+            raise ValueError(
+                f"Primary panel '{tr.primary_panel}' is not a declared panel. "
+                f"Available panels: {panel_cols}"
+            )
 
         return tr
 
@@ -794,28 +835,20 @@ class Trelliscope:
 
     def _finalize_meta_labels(self):
         """
-        Fill in the labels for any metas that do not have a label. It will
-        use the varname by default.
+        Fill in the labels for any metas that do not have a label, using this priority:
+        1. user-supplied label from set_var_labels()
+        2. varname as fallback
 
         Returns a copy of the Trelliscope object. The original is not modified.
         """
-        # This is how this is inferred in the R code...
-        # Finalize labels if NULL with the following priority:
-        # 1. use from disp$meta_labels if defined
-        # 2. use from attr(disp$df[[varname]], "label") if defined
-        # 3. set it to varname
-
-        # TODO: See if there is a Pandas equivalent to a column label
-        # that is separate from the column name. It appears this R
-        # functionality is not present in Pandas
-
-        # TODO: if tr.__copy() doesn't make copies of metas, this needs
-        # to make copies of the metas here before changing the label
         tr = self.__copy()
 
-        for meta in self.metas.values():
+        for meta in tr.metas.values():
             if meta.label is None:
-                meta.label = meta.varname
+                if meta.varname in tr.var_labels:
+                    meta.label = tr.var_labels[meta.varname]
+                else:
+                    meta.label = meta.varname
 
         return tr
 
@@ -1282,6 +1315,36 @@ class Trelliscope:
     # Currently unused.
     # def add_meta_labels(self):
     #     return self.__copy()
+
+    def set_var_labels(self, **labels):
+        """
+        Set human-readable display labels for one or more meta variables.
+
+        Labels are applied immediately to any already-defined metas and are
+        also stored so they are applied to metas inferred later during
+        `write_display()`.
+
+        Params:
+            **labels: Keyword arguments mapping varname to label string.
+                e.g. set_var_labels(country="Country Name", life_exp="Life Expectancy")
+
+        Returns a copy of the Trelliscope object. The original is not modified.
+        """
+        tr = self.__copy()
+
+        for varname, label in labels.items():
+            if not isinstance(label, str):
+                raise ValueError(
+                    f"Label for '{varname}' must be a string, got {type(label).__name__}."
+                )
+
+        tr.var_labels.update(labels)
+
+        for varname, label in labels.items():
+            if varname in tr.metas:
+                tr.metas[varname].label = label
+
+        return tr
 
     def set_default_labels(self, varnames: list):
         """

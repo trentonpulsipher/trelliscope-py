@@ -342,11 +342,46 @@ def check_exhaustive_levels(
 def check_graph_var(
     df: pd.DataFrame, varname: str, id_varname: str, get_error_message_function
 ):
-    """ """
-    # TODO: After we have determined how to handle the graph data in Pandas,
-    # implement this method to verify it.
+    """
+    Verify that a graph variable column contains valid graph data. Each cell
+    must be None/NaN or a list of dicts where every dict contains id_varname.
+    Params:
+        df: Pandas DataFrame
+        varname: The graph column to validate
+        id_varname: The key that must be present in every link dict
+        get_error_message_function: The function to call to get the error message template
+    Raises:
+        ValueError - If the check fails.
+    """
+    col = df[varname]
 
-    raise NotImplementedError()
+    for i, value in enumerate(col):
+        if value is None:
+            continue
+        if isinstance(value, float) and pd.isna(value):
+            continue
+        if not isinstance(value, list):
+            raise ValueError(
+                get_error_message_function(
+                    f"Graph column '{varname}' row {i} must be a list of dicts, "
+                    f"got {type(value).__name__}."
+                )
+            )
+        for j, item in enumerate(value):
+            if not isinstance(item, dict):
+                raise ValueError(
+                    get_error_message_function(
+                        f"Graph column '{varname}' row {i}, item {j} must be a dict, "
+                        f"got {type(item).__name__}."
+                    )
+                )
+            if id_varname not in item:
+                raise ValueError(
+                    get_error_message_function(
+                        f"Graph column '{varname}' row {i}, item {j} is missing "
+                        f"required key '{id_varname}'."
+                    )
+                )
 
 
 valid_image_extensions = {

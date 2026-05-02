@@ -349,19 +349,16 @@ class FactorMeta(Meta):
 
     def cast_variable(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Converts the `self.varname` column in the data frame to be a string type.
-        This will change the original data frame.
+        Converts the `self.varname` column to a pandas Categorical with the
+        factor levels. Levels are inferred from the data if not already set.
         Params:
             df: Pandas DataFrame
         Returns:
             The updated Pandas DataFrame
         """
-        # TODO: This seems we should cast it to a categorical variable
-        # rather than just a string. And it seems like this would be a
-        # better place to actual infer the levels than the "check_variable"
-        # function above.
-        raise NotImplementedError()
-        df[self.varname] = df[self.varname].astype(str)
+        if self.levels is None:
+            self.infer_levels(df)
+        df[self.varname] = pd.Categorical(df[self.varname], categories=self.levels)
         return df
 
 
@@ -481,15 +478,23 @@ class GeoMeta(Meta):
         utils.check_latitude_variable(df, self.latvar, self._get_data_error_message)
         utils.check_longitude_variable(df, self.longvar, self._get_data_error_message)
 
-    # TODO: add a cast variable function that converts lat and long into a single var name
+    def cast_variable(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Validates that latvar and longvar columns are numeric and in the correct
+        geographic ranges. Returns the dataframe unchanged (no coercion needed
+        since the viewer reads latvar/longvar columns directly).
+        Params:
+            df: Pandas DataFrame
+        Returns:
+            The Pandas DataFrame (unchanged)
+        """
+        self.check_variable(df)
+        return df
 
     def to_dict(self) -> dict:
-        # Overriding to make it so latvar and longvar are not serialized
         result = self.__dict__.copy()
-
-        result.pop("latvar", None)
-        result.pop("longvar", None)
-
+        if self.label is None:
+            result["label"] = self.varname
         return result
 
 
