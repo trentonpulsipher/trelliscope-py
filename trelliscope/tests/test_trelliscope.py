@@ -667,9 +667,8 @@ def test_serve_responds_to_http(iris_df_no_duplicates):
         assert response.getcode() == 200
 
 
-def test_save_figure_in_jupyter_event_loop(tmp_path):
-    """_save_figure succeeds even when called from inside a running event loop (Jupyter)."""
-    import asyncio
+def test_save_figure_calls_write_image(tmp_path):
+    """_save_figure delegates to fig.write_image for Plotly figures."""
     from unittest.mock import MagicMock
 
     captured = {}
@@ -682,10 +681,36 @@ def test_save_figure_in_jupyter_event_loop(tmp_path):
     mock_fig.write_image.side_effect = fake_write_image
 
     out = tmp_path / "out.png"
+    Trelliscope._save_figure(mock_fig, str(out))
 
-    async def run():
-        Trelliscope._save_figure(mock_fig, str(out))
-
-    asyncio.run(run())
     assert captured["path"] == str(out)
     assert mock_fig.write_image.call_count == 1
+
+
+def test_write_display_in_jupyter_event_loop(iris_df_no_duplicates, tmp_path):
+    """write_display() works when called from inside a running event loop (Jupyter)."""
+    import asyncio
+    from unittest.mock import MagicMock
+
+    df = iris_df_no_duplicates.copy()
+
+    def make_mock_fig():
+        fig = MagicMock()
+        fig.write_image.side_effect = lambda path: open(path, "wb").close()
+        return fig
+
+    df["panel"] = [make_mock_fig() for _ in range(len(df))]
+
+    async def run():
+        from trelliscope.panel_source import FilePanelSource
+        from trelliscope.panels import FigurePanel
+        pnl = FigurePanel("panel", source=FilePanelSource(False))
+        tr = (
+            Trelliscope(df, "test", path=str(tmp_path))
+            .add_panel(pnl)
+            .write_display()
+        )
+        return tr
+
+    tr = asyncio.run(run())
+    assert tr is not None

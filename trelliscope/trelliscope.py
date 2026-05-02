@@ -1235,26 +1235,8 @@ class Trelliscope:
     def _save_figure(fig, filepath: str) -> None:
         """Save a figure to disk, dispatching on Plotly vs matplotlib."""
         if hasattr(fig, "write_image"):
-            import asyncio
-            import concurrent.futures
-
-            # kaleido 1.x uses asyncio.run() internally. In Jupyter notebooks
-            # an event loop is already running, which causes asyncio.run() to
-            # raise RuntimeError ("Did you set 0 or less tabs?"). Running
-            # write_image in a worker thread avoids this because threads start
-            # with no event loop, so kaleido's asyncio.run() can create one.
             try:
-                asyncio.get_running_loop()
-                _in_jupyter = True
-            except RuntimeError:
-                _in_jupyter = False
-
-            try:
-                if _in_jupyter:
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-                        ex.submit(fig.write_image, filepath).result()
-                else:
-                    fig.write_image(filepath)
+                fig.write_image(filepath)
             except ValueError as e:
                 if "kaleido" in str(e).lower():
                     raise ValueError(
@@ -1396,18 +1378,33 @@ class Trelliscope:
                     )
                 else:
                     progress_bar = ProgressBar(len(tr.data_frame), "Saving Images:")
-                    tr.data_frame[panel_col] = tr.data_frame.apply(
-                        lambda row: Trelliscope.__write_figure(
-                            row=row,
-                            fig_column=panel.figure_varname,
-                            output_dir_for_writing=absolute_output_dir,
-                            output_dir_for_dataframe=relative_output_dir,
-                            extension=extension,
-                            key_cols=tr.key_cols,
-                            progress_bar=progress_bar,
-                        ),
-                        axis=1,
-                    )
+
+                    def _apply_write_figures(_tr=tr, _pb=progress_bar):
+                        return _tr.data_frame.apply(
+                            lambda row: Trelliscope.__write_figure(
+                                row=row,
+                                fig_column=panel.figure_varname,
+                                output_dir_for_writing=absolute_output_dir,
+                                output_dir_for_dataframe=relative_output_dir,
+                                extension=extension,
+                                key_cols=_tr.key_cols,
+                                progress_bar=_pb,
+                            ),
+                            axis=1,
+                        )
+
+                    # kaleido 1.x uses asyncio.run() internally, which fails
+                    # when Jupyter's event loop is already running. All figures
+                    # must be written in a single worker thread so that kaleido
+                    # can create and reuse one event loop across every figure.
+                    import asyncio
+                    import concurrent.futures
+                    try:
+                        asyncio.get_running_loop()
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                            tr.data_frame[panel_col] = ex.submit(_apply_write_figures).result()
+                    except RuntimeError:
+                        tr.data_frame[panel_col] = _apply_write_figures()
 
             if not skip_render:
                 tr._write_keysig(panel_col, current_keysig)
@@ -1793,8 +1790,11 @@ class Trelliscope:
             def log_message(self_h, *args):
                 pass
 
-        httpd = HTTPServer(("", port), _Handler)
-        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        try:
+            httpd = HTTPServer(("", port), _Handler)
+            threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        except OSError:
+            pass  # port already bound from a previous call — server still running
 
         url = Trelliscope._build_viewer_url(port)
 
@@ -1911,6 +1911,15 @@ class Trelliscope:
                 "No files exist for this Trelliscope exist. Before viewing the Trelliscope, "
                 + "ensure that the `write_display` method has been called."
             )
+
+        # In Jupyter: serve via HTTP and render an IFrame inline in the cell.
+        # webbrowser.open("file://...") cannot embed in a notebook output cell.
+        try:
+            ip = get_ipython()  # type: ignore[name-defined]
+            if ip is not None:
+                return self.serve()
+        except NameError:
+            pass
 
         full_path = "file://" + os.path.realpath(index_file)
 
