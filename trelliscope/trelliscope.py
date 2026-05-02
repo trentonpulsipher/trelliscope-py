@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import glob
+import hashlib
 import json
 import logging
 import os
@@ -23,7 +24,7 @@ from trelliscope.metas import (
     PanelMeta,
     StringMeta,
 )
-from trelliscope.panels import FigurePanel, ImagePanel, Panel, PanelOptions
+from trelliscope.panels import FigurePanel, ImagePanel, LazyPanel, Panel, PanelOptions
 from trelliscope.progress_bar import ProgressBar
 from trelliscope.theme import Theme
 from trelliscope.state import (
@@ -525,7 +526,7 @@ class Trelliscope:
             if (panel.is_writeable or panel.should_copy) and (
                 not panel.panels_written or force_write
             ):
-                tr = tr.write_or_copy_panels(panel_col)
+                tr = tr.write_or_copy_panels(panel_col, force_write=force_write)
 
         tr = tr.infer()
 
@@ -564,6 +565,10 @@ class Trelliscope:
         panel_cols = tr._get_panel_columns()
 
         for panel_col in panel_cols:
+            panel = tr._get_panel(panel_col)
+            if panel.is_lazy and panel_col not in tr.data_frame.columns:
+                # Lazy panels are written at write time; column may not exist beforehand.
+                continue
             if panel_col not in tr.data_frame.columns:
                 raise ValueError(
                     f"Panel column '{panel_col}' is not present in the data frame."
@@ -970,6 +975,21 @@ class Trelliscope:
         if len(panel_cols) == 0:
             # No panels exist yet
 
+            # Check for callable columns (lazy panels)
+            obj_cols = [
+                col
+                for col in tr.data_frame.columns
+                if utils.is_object_dtype(tr.data_frame[col])
+            ]
+            for column in obj_cols:
+                if utils.is_callable_column(tr.data_frame, column):
+                    fn = tr.data_frame[column][0]
+                    panel = LazyPanel(column, fn=fn)
+                    tr = tr.add_panel(panel)
+
+            # Refresh panel_cols after lazy panel detection
+            panel_cols = tr._get_panel_columns()
+
             # Check for a `Figure` col
             figure_columns = utils.find_figure_columns(tr.data_frame)
 
@@ -1078,7 +1098,11 @@ class Trelliscope:
         This used because when writing panels, the `varname` column will be updated to contain
         the filename, but the original figure is preserved in this "figure" column.
         """
-        figure_columns = [panel.figure_varname for panel in self.panels.values()]
+        figure_columns = [
+            panel.figure_varname
+            for panel in self.panels.values()
+            if panel.figure_varname is not None
+        ]
 
         return figure_columns
 
@@ -1195,6 +1219,30 @@ class Trelliscope:
         html_utils.write_id_file(output_path=output_path, trelliscope_id=self.id)
 
     @staticmethod
+    def _get_panel_filename(row, key_cols: list, output_dir: str, extension: str) -> str:
+        """Compute the output file path for a single panel image row."""
+        if len(key_cols) > 0:
+            key_col_values = [str(row[key_col]) for key_col in key_cols]
+            filename_prefix = "_".join(key_col_values)
+        else:
+            filename_prefix = str(row.name)
+        filename_prefix = utils.sanitize(filename_prefix)
+        return os.path.join(output_dir, f"{filename_prefix}.{extension}")
+
+    @staticmethod
+    def _save_figure(fig, filepath: str) -> None:
+        """Save a figure to disk, dispatching on Plotly vs matplotlib."""
+        if hasattr(fig, "write_image"):
+            fig.write_image(filepath)
+        elif hasattr(fig, "savefig"):
+            fig.savefig(filepath, bbox_inches="tight")
+        else:
+            raise ValueError(
+                f"Unsupported figure type '{type(fig).__name__}'. "
+                "Expected a Plotly Figure or a matplotlib Figure."
+            )
+
+    @staticmethod
     def __write_figure(
         row,
         fig_column: str,
@@ -1205,58 +1253,61 @@ class Trelliscope:
         progress_bar: ProgressBar = None,
     ):
         """
-        Saves a figure object to an image file. This function is designed to be passed to
-        a DataFrame.apply() call to write out each figure.
-        Params:
-            row - The DataFrame row
-            fig_column:str - The name of the figure column to write out
-            output_dir_for_writing:str - Used for writing the image. It is most likely an
-                absolute path.
-            output_dir_for_dataframe:str - Used for the result in the dataframe. It is most likely a
-                relative path.
-            extension:str - The file name extension to write (for example, "png")
-            key_cols:str - The columns that are used as the key (ie, index, group by) for this figure
+        Saves a figure object to an image file. Designed to be passed to DataFrame.apply().
         """
         fig = row[fig_column]
 
-        filename_prefix = ""
-        if len(key_cols) > 0:
-            key_col_values = [str(row[key_col]) for key_col in key_cols]
-            filename_prefix = "_".join(key_col_values)
-        else:
-            filename_prefix = row.name
-
-        filename_prefix = utils.sanitize(filename_prefix)
-
-        filename_for_writing = os.path.join(
-            output_dir_for_writing, f"{filename_prefix}.{extension}"
+        filename_for_writing = Trelliscope._get_panel_filename(
+            row, key_cols, output_dir_for_writing, extension
         )
-        filename_for_dataframe = os.path.join(
-            output_dir_for_dataframe, f"{filename_prefix}.{extension}"
+        filename_for_dataframe = Trelliscope._get_panel_filename(
+            row, key_cols, output_dir_for_dataframe, extension
         )
 
-        # logging.debug(f"Saving image {filename_for_writing}")
-        fig.write_image(filename_for_writing)
+        Trelliscope._save_figure(fig, filename_for_writing)
 
         try:
             progress_bar.record_progress()
         except Exception as e:
-            # If the progress display has a problem, just ignore it.
             logging.debug(f"Error recording progress: {e}")
-            pass
 
         return filename_for_dataframe
 
-    def write_or_copy_panels(self, panel_col: str):
+    def _compute_panel_keysig(self) -> str:
+        """Compute an MD5 hash of key column values to detect data changes between runs."""
+        key_values = self.data_frame[self.key_cols].astype(str).values.flatten().tolist()
+        content = "|".join(key_values)
+        return hashlib.md5(content.encode()).hexdigest()
+
+    def _read_stored_keysig(self, panel_col: str) -> str:
+        """Read the persisted keysig for a panel column. Returns None if absent."""
+        keysig_file = os.path.join(
+            self._get_panel_output_path(panel_col, is_absolute=True), ".keysig"
+        )
+        if os.path.isfile(keysig_file):
+            with open(keysig_file) as f:
+                return f.read().strip()
+        return None
+
+    def _write_keysig(self, panel_col: str, keysig: str) -> None:
+        """Persist the keysig for a panel column so future runs can skip unchanged panels."""
+        keysig_file = os.path.join(
+            self._get_panel_output_path(panel_col, is_absolute=True), ".keysig"
+        )
+        with open(keysig_file, "w") as f:
+            f.write(keysig)
+
+    def write_or_copy_panels(self, panel_col: str, force_write: bool = False):
         """
         Writes the panels to the output directory (or copies them if they are already files).
+
+        Params:
+            panel_col:str - The name of the panel column.
+            force_write:bool - If True, panels are always re-written even if unchanged.
         """
         tr = self.__copy()
 
-        panel = self._get_panel(panel_col)
-
-        # if not (panel.is_writeable or panel.should_copy):
-        #     raise ValueError("Error: Attempting to write a panel that is not writable or should not be copied")
+        panel = tr._get_panel(panel_col)
 
         absolute_output_dir = tr._get_panel_output_path(panel_col, is_absolute=True)
         relative_output_dir = tr._get_panel_output_path(panel_col, is_absolute=False)
@@ -1264,44 +1315,70 @@ class Trelliscope:
         if not os.path.isdir(absolute_output_dir):
             os.makedirs(absolute_output_dir)
 
-        # TODO: check if the panel is an html widget, and if so, create it here (see R)
-
         if panel.should_copy:
             tr._copy_images_to_build_directory(
                 panel_col, absolute_output_dir, relative_output_dir
             )
         elif panel.is_writeable:
-            # panel_keys = tr._get_panel_paths_from_keys()
             extension = panel.get_extension()
 
-            # TODO: Follow the logic in the R version to match filenames, etc.
-            # tr.data_frame["__PANEL_KEY__"] = tr.data_frame.apply(lambda row: Trelliscope.__write_figure(row, panel_col, output_dir, extension, self.key_cols), axis=1)
+            # Keysig cache: skip rendering if the key data hasn't changed
+            current_keysig = tr._compute_panel_keysig()
+            stored_keysig = tr._read_stored_keysig(panel_col)
+            skip_render = (not force_write) and (stored_keysig == current_keysig)
 
-            # TODO: Do we want to overwrite the current panel column (which is full of figure objects)
-            # with the new one full of filenames? Or should we create a new one and just make sure that the old
-            # one is excluded from the metas list, etc.
+            if panel.is_lazy:
+                # Lazy panel: generate figures via fn(row) at write time
+                progress_bar = ProgressBar(len(tr.data_frame), "Generating Panels:")
+                results = []
+                for _, row in tr.data_frame.iterrows():
+                    filename_for_dataframe = Trelliscope._get_panel_filename(
+                        row, tr.key_cols, relative_output_dir, extension
+                    )
+                    if not skip_render:
+                        filename_for_writing = Trelliscope._get_panel_filename(
+                            row, tr.key_cols, absolute_output_dir, extension
+                        )
+                        fig = panel.fn(row)
+                        Trelliscope._save_figure(fig, filename_for_writing)
+                        try:
+                            progress_bar.record_progress()
+                        except Exception as e:
+                            logging.debug(f"Error recording progress: {e}")
+                    results.append(filename_for_dataframe)
+                tr.data_frame[panel_col] = results
+            else:
+                # Regular figure panel: figures already live in df[panel_col]
+                tr.data_frame[panel.figure_varname] = tr.data_frame[panel_col]
 
-            # SB: For now, let's preserve the old with another column
-            tr.data_frame[panel.figure_varname] = tr.data_frame[panel_col]
+                if skip_render:
+                    logging.info(
+                        f"Skipping render for '{panel_col}': key data unchanged (keysig match)."
+                    )
+                    tr.data_frame[panel_col] = tr.data_frame.apply(
+                        lambda row: Trelliscope._get_panel_filename(
+                            row, tr.key_cols, relative_output_dir, extension
+                        ),
+                        axis=1,
+                    )
+                else:
+                    progress_bar = ProgressBar(len(tr.data_frame), "Saving Images:")
+                    tr.data_frame[panel_col] = tr.data_frame.apply(
+                        lambda row: Trelliscope.__write_figure(
+                            row=row,
+                            fig_column=panel.figure_varname,
+                            output_dir_for_writing=absolute_output_dir,
+                            output_dir_for_dataframe=relative_output_dir,
+                            extension=extension,
+                            key_cols=tr.key_cols,
+                            progress_bar=progress_bar,
+                        ),
+                        axis=1,
+                    )
 
-            progress_bar = ProgressBar(len(tr.data_frame), "Saving Images:")
-
-            tr.data_frame[panel_col] = tr.data_frame.apply(
-                lambda row: Trelliscope.__write_figure(
-                    row=row,
-                    fig_column=panel_col,
-                    output_dir_for_writing=absolute_output_dir,
-                    output_dir_for_dataframe=relative_output_dir,
-                    extension=extension,
-                    key_cols=self.key_cols,
-                    progress_bar=progress_bar,
-                ),
-                axis=1,
-            )
-
-            # TODO: Handle creating hash and key sig to avoid having to re-write panels
-            # that have already been generated here.
-            # One of the things that needs to happen here is to set the keysig to a hash of the columns
+            if not skip_render:
+                tr._write_keysig(panel_col, current_keysig)
+            tr.keysig = current_keysig
 
         panel.panels_written = True
 

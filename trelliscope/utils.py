@@ -442,17 +442,20 @@ def find_figure_columns(df: pd.DataFrame):
 
 def is_figure_column(df: pd.DataFrame, col: str):
     """
-    Determine if the column is explicitly filled with `Figure` objects.
+    Determine if the column is filled with figure objects (Plotly or matplotlib).
 
     Params:
         df:pd.DataFrame - The dataframe
         col:str - The column to check
     """
     is_figure = False
+    first = df[col][0]
 
-    if isinstance(df[col][0], plotly.graph_objs.Figure):
-        # The first row is a Figure, check all now
+    if isinstance(first, plotly.graph_objs.Figure):
         if df[col].apply(lambda x: isinstance(x, plotly.graph_objs.Figure)).all():
+            is_figure = True
+    elif is_matplotlib_figure(first):
+        if df[col].apply(lambda x: is_matplotlib_figure(x)).all():
             is_figure = True
 
     return is_figure
@@ -678,6 +681,41 @@ def is_string_column(column: pd.Series):
             is_string = True
 
     return is_string
+
+
+def is_matplotlib_figure(obj) -> bool:
+    """Returns True if obj is a matplotlib Figure; False if matplotlib is not installed."""
+    try:
+        import matplotlib.figure
+
+        return isinstance(obj, matplotlib.figure.Figure)
+    except ImportError:
+        return False
+
+
+def is_matplotlib_figure_column(df: pd.DataFrame, col: str) -> bool:
+    """Returns True if the column is entirely filled with matplotlib Figure objects."""
+    if not is_object_dtype(df[col]):
+        return False
+    try:
+        import matplotlib.figure
+
+        first = df[col][0]
+        if not isinstance(first, matplotlib.figure.Figure):
+            return False
+        return df[col].apply(lambda x: isinstance(x, matplotlib.figure.Figure)).all()
+    except ImportError:
+        return False
+
+
+def is_callable_column(df: pd.DataFrame, col: str) -> bool:
+    """Returns True if the column contains only callable objects (for lazy panels)."""
+    if not is_object_dtype(df[col]):
+        return False
+    first = df[col][0]
+    if not callable(first):
+        return False
+    return df[col].dropna().apply(callable).all()
 
 
 def is_datetime_column(column: pd.Series, must_be_datetime_objects: bool):
