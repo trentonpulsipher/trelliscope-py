@@ -5,6 +5,14 @@ This repository contains an experimental Python port of the trelliscope R packag
 
 Install from source (see [Getting Started for Development](development.md)), then try the minimal example below.
 
+Panels made from Plotly figures need the `plotly` extra, which adds kaleido for image export:
+
+```
+pip install -e ".[plotly]"
+```
+
+matplotlib panels and panels from existing image files need no extra.
+
 ### Plotly figures
 
 ```python

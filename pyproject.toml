@@ -11,7 +11,6 @@ exclude = ["trelliscope/tests"]
 name = "trelliscope"
 dependencies = [
     "pandas >= 1.5.2",
-    "kaleido",
     "plotly >= 5.19.0",
     "plotly-express >= 0.4.1",
     "importlib_resources;python_version<'3.9'"
@@ -27,8 +26,14 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
+# Needed only to write Plotly figures as panel images. kaleido 1.x requires
+# plotly 6.1.1+, so the pair is pinned together here.
+plotly = [
+    "kaleido >= 1.0",
+    "plotly >= 6.1.1"
+]
 dev = [
-    "trelliscope[test]",
+    "trelliscope[plotly,test]",
     "ruff~=0.1",
     "pre-commit"
 ]

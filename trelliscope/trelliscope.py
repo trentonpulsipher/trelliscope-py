@@ -1243,8 +1243,8 @@ class Trelliscope:
                     raise ValueError(
                         "Plotly could not export an image because kaleido is not "
                         "installed or not working in this environment.\n\n"
-                        "Install kaleido:\n\n"
-                        "    pip install kaleido\n\n"
+                        "Install it with the plotly extra:\n\n"
+                        '    pip install "trelliscope[plotly]"\n\n'
                         "If you are in SageMaker, also run:\n\n"
                         "    plotly_get_chrome\n\n"
                         "Then restart your kernel/session."
