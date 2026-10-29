@@ -1,3 +1,5 @@
+import base64
+import json
 import os
 import shutil
 import tempfile
@@ -665,6 +667,50 @@ def test_serve_responds_to_http(iris_df_no_duplicates):
         time.sleep(0.3)  # let the daemon thread bind its socket
         response = urllib.request.urlopen("http://localhost:19878/index.html", timeout=3)
         assert response.getcode() == 200
+
+
+def test_to_html_raises_before_write(iris_df_no_duplicates):
+    df = iris_df_no_duplicates.copy()
+    df["img"] = "test.png"
+    pnl = ImagePanel("img", source=FilePanelSource(False), should_copy_to_output=False)
+    tr = Trelliscope(df, "test").add_panel(pnl)
+    with pytest.raises(ValueError, match="write_display"):
+        tr.to_html()
+
+
+def test_to_html_inlines_data_and_local_panels(tmp_path):
+    TINY_PNG = base64.b64decode(
+        b"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk"
+        b"+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+    )
+    rows = []
+    for i in range(3):
+        img_path = tmp_path / f"row_{i}.png"
+        img_path.write_bytes(TINY_PNG)
+        rows.append({"id": str(i), "note": "</script>", "img_panel": str(img_path)})
+
+    tr = (
+        Trelliscope(pd.DataFrame(rows), "test", path=str(tmp_path / "out"))
+        .add_panel(
+            ImagePanel("img_panel", FilePanelSource(True), should_copy_to_output=True)
+        )
+        .write_display()
+    )
+
+    html = tr.to_html()
+
+    # Only the page's own two script elements close; the data's "</script>" is escaped.
+    page_script_count = 2
+    assert html.count("</script>") == page_script_count
+    app_data_json = html.split(f'trelliscopeApp("{tr.id}", ', 1)[1].rsplit(");", 1)[0]
+    app_data = json.loads(app_data_json)
+
+    display = app_data["displays"]["test"]
+    panel_meta = next(m for m in display["displayInfo"]["metas"] if m["type"] == "panel")
+    assert panel_meta["source"]["isLocal"] is False
+    png_uri = "data:image/png;base64," + base64.b64encode(TINY_PNG).decode("ascii")
+    assert [row["img_panel"] for row in display["metaData"]] == [png_uri] * 3
+    assert app_data["displayList"][0]["thumbnailurl"] == png_uri
 
 
 def test_save_figure_calls_write_image(tmp_path):

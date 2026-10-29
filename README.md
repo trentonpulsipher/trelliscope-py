@@ -99,6 +99,28 @@ df = pd.DataFrame(rows)
 Trelliscope(df, name="Iris matplotlib", path="./iris_mpl").write_display()
 ```
 
+## Viewing and sharing
+
+In a notebook (Jupyter, VS Code, SageMaker, Hex), `view_trelliscope()` shows the
+display in the cell output.
+It needs no web server, because the data and panel images are inlined.
+In a script, it opens `index.html` in your browser.
+
+`to_html()` returns the same self-contained page as a string.
+Save it to share the display as one file:
+
+```python
+from pathlib import Path
+
+tr = Trelliscope(df, name="Iris", path="./iris_display").write_display()
+Path("iris.html").write_text(tr.to_html())
+```
+
+The page loads the Trelliscope JavaScript library from unpkg, so the viewer needs
+internet access.
+Every panel image is inside the file, so keep panels small when a display has many
+rows.
+
 ## More Examples
 
 For a fuller walkthrough see the

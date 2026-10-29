@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import glob
 import hashlib
+import html
 import json
 import logging
 import os
@@ -1898,6 +1899,24 @@ class Trelliscope:
         print(f"Trelliscope server running at:\n  {url}")
         return url
 
+    def to_html(self) -> str:
+        """
+        Returns the written Trelliscope as one self-contained html page, with
+        its data and panel images inlined. Save it to share the display as a
+        single file.
+
+        Note: The Trelliscope should be written first using `write_display()`
+        """
+        output_path = self.get_output_path()
+        if output_path is None or not os.path.exists(
+            os.path.join(output_path, "index.html")
+        ):
+            raise ValueError(
+                "No display output found. Call write_display() before to_html()."
+            )
+
+        return html_utils.get_self_contained_html(output_path, self.javascript_version)
+
     def view_trelliscope(self):
         """
         Attempts to open the current Trelliscope in a browser.
@@ -1912,12 +1931,24 @@ class Trelliscope:
                 + "ensure that the `write_display` method has been called."
             )
 
-        # In Jupyter: serve via HTTP and render an IFrame inline in the cell.
-        # webbrowser.open("file://...") cannot embed in a notebook output cell.
+        # In a notebook, embed the self-contained page in the cell. It needs no
+        # server, so it also works where a local port is unreachable (Hex, the
+        # SageMaker proxy).
         try:
             ip = get_ipython()  # type: ignore[name-defined]
             if ip is not None:
-                return self.serve()
+                from IPython.display import HTML
+                from IPython.display import display as ipy_display
+
+                srcdoc = html.escape(self.to_html(), quote=True)
+                # The wrapping div stops IPython warning about a bare iframe.
+                ipy_display(
+                    HTML(
+                        f'<div><iframe srcdoc="{srcdoc}" width="100%" height="650" '
+                        'style="border: none"></iframe></div>'
+                    )
+                )
+                return self
         except NameError:
             pass
 
