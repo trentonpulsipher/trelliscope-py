@@ -107,6 +107,27 @@ df = pd.DataFrame(rows)
 Trelliscope(df, name="Iris matplotlib", path="./iris_mpl").write_display()
 ```
 
+### Interactive Plotly panels
+
+Set the panel format to `html` to keep Plotly figures interactive (hover, zoom, pan).
+html panels need no kaleido or Chrome, so they also work where static image export
+cannot, such as Hex.
+
+```python
+from trelliscope.panels import PanelOptions
+
+(
+    Trelliscope(df, name="Iris Interactive", path="./iris_html")
+    .set_panel_options({"panel": PanelOptions(format="html")})
+    .write_display()
+)
+```
+
+For a `LazyPanel`, pass `extension="html"`.
+Each panel loads plotly.js from its CDN.
+Small panels leave little room for axis titles, so remove them
+(`fig.update_xaxes(title=None)`) when you show many columns.
+
 ## Viewing and sharing
 
 In a notebook (Jupyter, VS Code, SageMaker, Hex), `view_trelliscope()` shows the

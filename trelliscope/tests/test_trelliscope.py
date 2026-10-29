@@ -6,11 +6,12 @@ import tempfile
 import urllib.request
 
 import pandas as pd
+import plotly.graph_objects as go
 import pytest
 
 from trelliscope import Trelliscope
 from trelliscope.panel_source import FilePanelSource
-from trelliscope.panels import ImagePanel, Panel
+from trelliscope.panels import ImagePanel, Panel, PanelOptions
 from trelliscope.state import SortState
 
 
@@ -711,6 +712,59 @@ def test_to_html_inlines_data_and_local_panels(tmp_path):
     png_uri = "data:image/png;base64," + base64.b64encode(TINY_PNG).decode("ascii")
     assert [row["img_panel"] for row in display["metaData"]] == [png_uri] * 3
     assert app_data["displayList"][0]["thumbnailurl"] == png_uri
+
+
+def test_save_figure_html_writes_page_without_changing_figure(tmp_path):
+    fig = go.Figure(go.Scatter(x=[1, 2], y=[3, 4]))
+    out = tmp_path / "out.html"
+
+    Trelliscope._save_figure(fig, str(out))
+
+    page = out.read_text()
+    assert "cdn.plot.ly" in page
+    assert '"margin":{"l":50' in page
+    assert not fig.layout.margin.to_plotly_json()
+
+
+def test_save_figure_html_keeps_figure_margins(tmp_path):
+    fig = go.Figure().update_layout(margin={"l": 7})
+    out = tmp_path / "out.html"
+
+    Trelliscope._save_figure(fig, str(out))
+
+    assert '"margin":{"l":7}' in out.read_text()
+
+
+def test_save_figure_html_rejects_matplotlib(tmp_path):
+    matplotlib = pytest.importorskip("matplotlib")
+    matplotlib.use("Agg")
+    plt = pytest.importorskip("matplotlib.pyplot")
+
+    fig = plt.figure()
+    plt.close(fig)
+    with pytest.raises(ValueError, match="Plotly"):
+        Trelliscope._save_figure(fig, str(tmp_path / "out.html"))
+
+
+def test_to_html_inlines_html_panels(tmp_path):
+    df = pd.DataFrame(
+        {"id": ["a", "b"], "panel": [go.Figure(go.Bar(y=[1])), go.Figure(go.Bar(y=[2]))]}
+    )
+    tr = (
+        Trelliscope(df, "test", path=str(tmp_path))
+        .set_panel_options({"panel": PanelOptions(format="html")})
+        .write_display()
+    )
+
+    html = tr.to_html()
+    app_data_json = html.split(f'trelliscopeApp("{tr.id}", ', 1)[1].rsplit(");", 1)[0]
+    display = json.loads(app_data_json)["displays"]["test"]
+
+    panel_meta = next(m for m in display["displayInfo"]["metas"] if m["type"] == "panel")
+    assert panel_meta["paneltype"] == "iframe"
+    for row in display["metaData"]:
+        page = base64.b64decode(row["panel"].removeprefix("data:text/html;base64,"))
+        assert b"cdn.plot.ly" in page
 
 
 def test_save_figure_calls_write_image(tmp_path):

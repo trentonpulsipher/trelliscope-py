@@ -1,11 +1,19 @@
 import tempfile
 
 import pandas as pd
+import plotly.graph_objects as go
 import pytest
 
 from trelliscope import Trelliscope
 from trelliscope.panel_source import FilePanelSource
-from trelliscope.panels import IFramePanel, ImagePanel, Panel, PanelOptions
+from trelliscope.panels import (
+    FigurePanel,
+    IFramePanel,
+    ImagePanel,
+    LazyPanel,
+    Panel,
+    PanelOptions,
+)
 
 
 def test_panels_setup_no_uniquely_identifying_columns(iris_df: pd.DataFrame):
@@ -203,3 +211,19 @@ def test_set_panel_options(mars_df: pd.DataFrame):
 
         panel = tr._get_panel("img_src")
         assert panel.aspect_ratio == pytest.approx(1.0, 0.01)
+
+
+def test_figure_panel_type_follows_extension():
+    source = FilePanelSource(is_local=True)
+    assert FigurePanel("panel", source=source).panel_type_str == "img"
+    assert FigurePanel("panel", source=source, extension="html").panel_type_str == "iframe"
+    assert LazyPanel("panel", fn=lambda row: None, extension="html").panel_type_str == "iframe"
+
+
+def test_html_format_from_panel_options():
+    df = pd.DataFrame({"id": ["a", "b"], "panel": [go.Figure(), go.Figure()]})
+    panel = Panel.create_panel(
+        df, "panel", PanelOptions(format="html"), is_known_figure_col=True
+    )
+    assert panel.get_extension() == "html"
+    assert panel.panel_type_str == "iframe"

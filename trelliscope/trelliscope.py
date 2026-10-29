@@ -14,6 +14,7 @@ import webbrowser
 from typing import Any
 
 import pandas as pd
+import plotly.graph_objects as go
 
 from trelliscope import html_utils, utils
 from trelliscope.input import Input
@@ -1235,7 +1236,23 @@ class Trelliscope:
     @staticmethod
     def _save_figure(fig, filepath: str) -> None:
         """Save a figure to disk, dispatching on Plotly vs matplotlib."""
-        if hasattr(fig, "write_image"):
+        if filepath.endswith(".html"):
+            if not hasattr(fig, "write_html"):
+                raise ValueError(
+                    f"The html panel format needs Plotly figures, not "
+                    f"'{type(fig).__name__}'. Use the png format instead."
+                )
+            # Plotly's default margins leave little room for the plot in a small
+            # panel, so use compact ones unless the figure sets its own.
+            if not fig.layout.margin.to_plotly_json():
+                top = 40 if fig.layout.title.text else 10
+                fig = go.Figure(fig).update_layout(
+                    margin={"l": 50, "r": 10, "t": top, "b": 40}
+                )
+            # Loading plotly.js from its CDN keeps each panel file small, and
+            # html export needs no kaleido or Chrome.
+            fig.write_html(filepath, include_plotlyjs="cdn")
+        elif hasattr(fig, "write_image"):
             try:
                 fig.write_image(filepath)
             except ValueError as e:

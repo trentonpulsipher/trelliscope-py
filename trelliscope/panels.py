@@ -77,6 +77,14 @@ class Panel:
     def get_extension(self) -> str:
         raise NotImplementedError("This type of panel does not provide for extensions.")
 
+    def _set_extension(self, extension: str) -> None:
+        self.extension = extension
+        # Figures written as html are interactive pages, so they display in an iframe.
+        if extension == "html":
+            self.panel_type_str = Panel._PANEL_TYPE_IFRAME
+        else:
+            self.panel_type_str = Panel._PANEL_TYPE_IMAGE
+
     def check_valid(self, df: pd.DataFrame):
         # Check that varname exists
         utils.check_has_variable(df, self.varname)
@@ -134,7 +142,7 @@ class Panel:
             panel = FigurePanel(panel_column, source=panel_source)
 
             if panel_options is not None and panel_options.format is not None:
-                panel.extension = panel_options.format
+                panel._set_extension(panel_options.format)
 
         elif is_known_image_col or utils.is_image_column(df, panel_column):
             is_local = not utils.is_all_remote(df[panel_column])
@@ -218,7 +226,7 @@ class FigurePanel(Panel):
             writeable=True,
         )
 
-        self.extension = extension
+        self._set_extension(extension)
         self.figure_varname = self.varname + Panel._FIGURE_SUFFIX
 
     def get_extension(self) -> str:
@@ -255,7 +263,7 @@ class LazyPanel(Panel):
         )
         self.fn = fn
         self.is_lazy = True
-        self.extension = extension
+        self._set_extension(extension)
         self.figure_varname = self.varname + Panel._FIGURE_SUFFIX
 
     def get_extension(self) -> str:
