@@ -1267,6 +1267,18 @@ class Trelliscope:
                         "Then restart your kernel/session."
                     ) from None
                 raise
+            except RuntimeError as e:
+                # kaleido 1.x raises RuntimeError subclasses when Chrome is missing
+                # or cannot start, as in hosted notebooks such as Hex and SageMaker.
+                if "chrome" in str(e).lower() or "browser" in type(e).__name__.lower():
+                    raise ValueError(
+                        "Plotly could not start Chrome to export a png panel. "
+                        "Chrome cannot run in some hosted notebooks, such as Hex "
+                        "and SageMaker.\n\n"
+                        "Use interactive html panels instead, which need no Chrome:\n\n"
+                        '    .set_panel_options({"<panel column>": PanelOptions(format="html")})'
+                    ) from e
+                raise
         elif hasattr(fig, "savefig"):
             fig.savefig(filepath, bbox_inches="tight")
         else:

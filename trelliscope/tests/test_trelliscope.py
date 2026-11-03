@@ -767,6 +767,29 @@ def test_to_html_inlines_html_panels(tmp_path):
         assert b"cdn.plot.ly" in page
 
 
+@pytest.mark.parametrize(
+    "error",
+    [
+        RuntimeError("Kaleido requires Google Chrome to be installed."),
+        type("BrowserFailedError", (RuntimeError,), {})("closed immediately"),
+    ],
+)
+def test_save_figure_png_explains_chrome_failure(tmp_path, error):
+    fig = go.Figure()
+    fig.write_image = lambda path: (_ for _ in ()).throw(error)
+
+    with pytest.raises(ValueError, match='format="html"'):
+        Trelliscope._save_figure(fig, str(tmp_path / "out.png"))
+
+
+def test_save_figure_png_reraises_other_runtime_errors(tmp_path):
+    fig = go.Figure()
+    fig.write_image = lambda path: (_ for _ in ()).throw(RuntimeError("disk full"))
+
+    with pytest.raises(RuntimeError, match="disk full"):
+        Trelliscope._save_figure(fig, str(tmp_path / "out.png"))
+
+
 def test_save_figure_calls_write_image(tmp_path):
     """_save_figure delegates to fig.write_image for Plotly figures."""
     from unittest.mock import MagicMock
