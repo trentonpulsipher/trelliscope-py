@@ -760,11 +760,12 @@ def test_to_html_inlines_html_panels(tmp_path):
     app_data_json = html.split(f'trelliscopeApp("{tr.id}", ', 1)[1].rsplit(");", 1)[0]
     display = json.loads(app_data_json)["displays"]["test"]
 
+    # srcdoc frames share the page's cache, so plotly.js downloads only once.
     panel_meta = next(m for m in display["displayInfo"]["metas"] if m["type"] == "panel")
-    assert panel_meta["paneltype"] == "iframe"
+    assert panel_meta["paneltype"] == "iframeSrcDoc"
     for row in display["metaData"]:
-        page = base64.b64decode(row["panel"].removeprefix("data:text/html;base64,"))
-        assert b"cdn.plot.ly" in page
+        assert row["panel"].lower().startswith("<!doctype html>")
+        assert "cdn.plot.ly" in row["panel"]
 
 
 @pytest.mark.parametrize(

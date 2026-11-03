@@ -98,9 +98,17 @@ def get_self_contained_html(output_path: str, javascript_version: str = None) ->
                 continue
             # The JS app uses a non-local panel's value as its src unchanged.
             source["isLocal"] = False
+            # html panels go in as srcdoc, not data URIs: srcdoc frames share the
+            # page's HTTP cache, so scripts they load (plotly.js) download once.
+            is_html = meta.get("paneltype") == "iframe"
+            if is_html:
+                meta["paneltype"] = "iframeSrcDoc"
             for row in meta_data:
                 if row.get(meta["varname"]):
-                    row[meta["varname"]] = _to_data_uri(display_dir / row[meta["varname"]])
+                    panel_file = display_dir / row[meta["varname"]]
+                    row[meta["varname"]] = (
+                        panel_file.read_text() if is_html else _to_data_uri(panel_file)
+                    )
 
         displays[display_info["name"]] = {
             "displayInfo": display_info,
