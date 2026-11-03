@@ -5,13 +5,13 @@ This repository contains an experimental Python port of the trelliscope R packag
 
 Install from source (see [Getting Started for Development](development.md)), then try the minimal example below.
 
-Panels made from Plotly figures need the `plotly` extra, which adds kaleido for image export:
+Plotly figures become interactive html panels by default, and need no extra.
+Static png panels from Plotly figures need the `plotly` extra, which adds kaleido
+(and kaleido needs Chrome):
 
 ```
 pip install -e ".[plotly]"
 ```
-
-matplotlib panels and panels from existing image files need no extra.
 
 ### Plotly figures
 
@@ -109,22 +109,25 @@ Trelliscope(df, name="Iris matplotlib", path="./iris_mpl").write_display()
 
 ### Interactive Plotly panels
 
-Set the panel format to `html` to keep Plotly figures interactive (hover, zoom, pan).
+Plotly figures are written as interactive html panels (hover, zoom, pan) by default.
 html panels need no kaleido or Chrome, so they also work where static image export
-cannot, such as Hex.
+cannot, such as Hex and SageMaker.
+matplotlib figures are written as png.
+
+To get static png panels from Plotly figures instead, set the panel format:
 
 ```python
 from trelliscope.panels import PanelOptions
 
 (
-    Trelliscope(df, name="Iris Interactive", path="./iris_html")
-    .set_panel_options({"panel": PanelOptions(format="html")})
+    Trelliscope(df, name="Iris Static", path="./iris_png")
+    .set_panel_options({"panel": PanelOptions(format="png")})
     .write_display()
 )
 ```
 
-For a `LazyPanel`, pass `extension="html"`.
-Each panel loads plotly.js from its CDN.
+For a `LazyPanel`, pass `extension="png"`.
+Each html panel loads plotly.js from its CDN.
 Small panels leave little room for axis titles, so remove them
 (`fig.update_xaxes(title=None)`) when you show many columns.
 

@@ -1365,6 +1365,7 @@ class Trelliscope:
                 panel_col, absolute_output_dir, relative_output_dir
             )
         elif panel.is_writeable:
+            panel._resolve_extension(tr.data_frame, panel_col)
             extension = panel.get_extension()
 
             # Keysig cache: skip rendering if the key data hasn't changed

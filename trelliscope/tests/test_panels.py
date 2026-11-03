@@ -215,7 +215,7 @@ def test_set_panel_options(mars_df: pd.DataFrame):
 
 def test_figure_panel_type_follows_extension():
     source = FilePanelSource(is_local=True)
-    assert FigurePanel("panel", source=source).panel_type_str == "img"
+    assert FigurePanel("panel", source=source, extension="png").panel_type_str == "img"
     assert FigurePanel("panel", source=source, extension="html").panel_type_str == "iframe"
     assert LazyPanel("panel", fn=lambda row: None, extension="html").panel_type_str == "iframe"
 
@@ -227,3 +227,46 @@ def test_html_format_from_panel_options():
     )
     assert panel.get_extension() == "html"
     assert panel.panel_type_str == "iframe"
+
+
+def test_plotly_figures_default_to_html():
+    df = pd.DataFrame({"id": ["a", "b"], "panel": [go.Figure(), go.Figure()]})
+    panel = Panel.create_panel(df, "panel", is_known_figure_col=True)
+    assert panel.get_extension() == "html"
+    assert panel.panel_type_str == "iframe"
+
+
+def test_plotly_figures_keep_explicit_png():
+    df = pd.DataFrame({"id": ["a", "b"], "panel": [go.Figure(), go.Figure()]})
+    panel = Panel.create_panel(
+        df, "panel", PanelOptions(format="png"), is_known_figure_col=True
+    )
+    assert panel.get_extension() == "png"
+    assert panel.panel_type_str == "img"
+
+
+def test_matplotlib_figures_default_to_png():
+    matplotlib = pytest.importorskip("matplotlib")
+    matplotlib.use("Agg")
+    plt = pytest.importorskip("matplotlib.pyplot")
+
+    fig = plt.figure()
+    plt.close(fig)
+    df = pd.DataFrame({"id": ["a"], "panel": [fig]})
+    panel = Panel.create_panel(df, "panel", is_known_figure_col=True)
+    assert panel.get_extension() == "png"
+    assert panel.panel_type_str == "img"
+
+
+def test_lazy_plotly_panel_defaults_to_html(tmp_path):
+    df = pd.DataFrame({"id": ["a", "b"], "y": [1, 2]})
+    tr = (
+        Trelliscope(df, "test", path=str(tmp_path))
+        .add_panel(LazyPanel("panel", fn=lambda row: go.Figure(go.Bar(y=[row["y"]]))))
+        .write_display()
+    )
+
+    panel = tr._get_panel("panel")
+    assert panel.get_extension() == "html"
+    assert tr.metas["panel"].panel_type == "iframe"
+    assert tr.data_frame["panel"].str.endswith(".html").all()

@@ -1,4 +1,5 @@
 import pandas as pd
+from plotly.basedatatypes import BaseFigure
 
 from trelliscope import utils
 
@@ -85,6 +86,15 @@ class Panel:
         else:
             self.panel_type_str = Panel._PANEL_TYPE_IMAGE
 
+    def _resolve_extension(self, df: pd.DataFrame, panel_column: str) -> None:
+        """Sets the format from the first figure when none was given."""
+        if self.extension is not None:
+            return
+        sample = self.fn(df.iloc[0]) if self.is_lazy else df[panel_column].iloc[0]
+        # Plotly png export needs Chrome, which hosted notebooks (Hex,
+        # SageMaker) cannot run, so Plotly figures default to html.
+        self._set_extension("html" if isinstance(sample, BaseFigure) else "png")
+
     def check_valid(self, df: pd.DataFrame):
         # Check that varname exists
         utils.check_has_variable(df, self.varname)
@@ -143,6 +153,7 @@ class Panel:
 
             if panel_options is not None and panel_options.format is not None:
                 panel._set_extension(panel_options.format)
+            panel._resolve_extension(df, panel_column)
 
         elif is_known_image_col or utils.is_image_column(df, panel_column):
             is_local = not utils.is_all_remote(df[panel_column])
@@ -214,7 +225,7 @@ class FigurePanel(Panel):
         self,
         varname: str,
         source: PanelSource,
-        extension: str = "png",
+        extension: str = None,
         aspect_ratio: float = 1.5,
     ) -> None:
         super().__init__(
@@ -246,7 +257,7 @@ class LazyPanel(Panel):
         self,
         varname: str,
         fn,
-        extension: str = "png",
+        extension: str = None,
         aspect_ratio: float = 1.5,
     ) -> None:
         if not callable(fn):
